@@ -1,0 +1,26 @@
+```
+# Compiled binaries
+file_search
+generate_test_data
+*.exe
+
+# Object files
+*.o
+*.obj
+
+# Test data
+test_data/
+large_test_data/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# MacOS
+.DS_Store
+
+# Build artifacts
+build/
