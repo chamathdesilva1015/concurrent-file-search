@@ -1,6 +1,10 @@
 #ifndef FILE_SEARCHER_H
 #define FILE_SEARCHER_H
 
+#if __cplusplus < 201703L
+#error "This project requires C++17 or later. Please use -std=c++17 or higher."
+#endif
+
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -43,27 +47,33 @@ class FileSearcher {
 public:
     std::vector<SearchResult> search_single_threaded(
         const std::string& directory,
-        const std::string& keyword
+        const std::string& keyword,
+        const std::string& extension = "",
+        bool case_sensitive = false
     );
     
     std::vector<SearchResult> search_multi_threaded(
         const std::string& directory,
         const std::string& keyword,
-        size_t num_threads = std::thread::hardware_concurrency()
+        size_t num_threads = std::thread::hardware_concurrency(),
+        const std::string& extension = "",
+        bool case_sensitive = false
     );
 
 private:
     void search_file(
         const std::string& filepath,
         const std::string& keyword,
-        std::vector<SearchResult>& results
+        std::vector<SearchResult>& results,
+        bool case_sensitive = false
     );
     
     void search_file_thread_safe(
         const std::string& filepath,
         const std::string& keyword,
         std::vector<SearchResult>& results,
-        std::mutex& results_mutex
+        std::mutex& results_mutex,
+        bool case_sensitive = false
     );
 };
 

@@ -31,8 +31,8 @@ ThreadPool::ThreadPool(size_t num_threads) : stop(false), active_tasks(0) {
                 {
                     std::unique_lock<std::mutex> lock(queue_mutex);
                     active_tasks--;
+                    finished_condition.notify_all();
                 }
-                finished_condition.notify_all();
             }
         });
     }
@@ -68,14 +68,25 @@ void ThreadPool::wait_all() {
 
 std::vector<SearchResult> FileSearcher::search_single_threaded(
     const std::string& directory,
-    const std::string& keyword
+    const std::string& keyword,
+    const std::string& extension,
+    bool case_sensitive
 ) {
     std::vector<SearchResult> results;
+    
+    std::string search_keyword = keyword;
+    if (!case_sensitive) {
+        std::transform(search_keyword.begin(), search_keyword.end(), 
+                      search_keyword.begin(), ::tolower);
+    }
     
     try {
         for (const auto& entry : fs::recursive_directory_iterator(directory)) {
             if (entry.is_regular_file()) {
-                search_file(entry.path().string(), keyword, results);
+                if (!extension.empty() && entry.path().extension() != extension) {
+                    continue;
+                }
+                search_file(entry.path().string(), search_keyword, results, case_sensitive);
             }
         }
     } catch (const fs::filesystem_error& e) {
@@ -88,20 +99,33 @@ std::vector<SearchResult> FileSearcher::search_single_threaded(
 std::vector<SearchResult> FileSearcher::search_multi_threaded(
     const std::string& directory,
     const std::string& keyword,
-    size_t num_threads
+    size_t num_threads,
+    const std::string& extension,
+    bool case_sensitive
 ) {
     std::vector<SearchResult> results;
     std::mutex results_mutex;
+    
+    if (num_threads == 0) num_threads = 1;
+
+    std::string search_keyword = keyword;
+    if (!case_sensitive) {
+        std::transform(search_keyword.begin(), search_keyword.end(), 
+                      search_keyword.begin(), ::tolower);
+    }
     
     ThreadPool pool(num_threads);
     
     try {
         for (const auto& entry : fs::recursive_directory_iterator(directory)) {
             if (entry.is_regular_file()) {
+                if (!extension.empty() && entry.path().extension() != extension) {
+                    continue;
+                }
                 std::string filepath = entry.path().string();
                 
-                pool.enqueue([this, filepath, keyword, &results, &results_mutex] {
-                    search_file_thread_safe(filepath, keyword, results, results_mutex);
+                pool.enqueue([this, filepath, search_keyword, &results, &results_mutex, case_sensitive] {
+                    search_file_thread_safe(filepath, search_keyword, results, results_mutex, case_sensitive);
                 });
             }
         }
@@ -117,7 +141,8 @@ std::vector<SearchResult> FileSearcher::search_multi_threaded(
 void FileSearcher::search_file(
     const std::string& filepath,
     const std::string& keyword,
-    std::vector<SearchResult>& results
+    std::vector<SearchResult>& results,
+    bool case_sensitive
 ) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
@@ -130,16 +155,18 @@ void FileSearcher::search_file(
     while (std::getline(file, line)) {
         line_number++;
         
-        std::string line_lower = line;
-        std::string keyword_lower = keyword;
-        
-        std::transform(line_lower.begin(), line_lower.end(), 
-                      line_lower.begin(), ::tolower);
-        std::transform(keyword_lower.begin(), keyword_lower.end(), 
-                      keyword_lower.begin(), ::tolower);
-        
-        if (line_lower.find(keyword_lower) != std::string::npos) {
-            results.push_back({filepath, line_number, line});
+        if (case_sensitive) {
+            if (line.find(keyword) != std::string::npos) {
+                results.push_back({filepath, line_number, line});
+            }
+        } else {
+            std::string line_lower = line;
+            std::transform(line_lower.begin(), line_lower.end(), 
+                          line_lower.begin(), ::tolower);
+            
+            if (line_lower.find(keyword) != std::string::npos) {
+                results.push_back({filepath, line_number, line});
+            }
         }
     }
     
@@ -150,10 +177,11 @@ void FileSearcher::search_file_thread_safe(
     const std::string& filepath,
     const std::string& keyword,
     std::vector<SearchResult>& results,
-    std::mutex& results_mutex
+    std::mutex& results_mutex,
+    bool case_sensitive
 ) {
     std::vector<SearchResult> local_results;
-    search_file(filepath, keyword, local_results);
+    search_file(filepath, keyword, local_results, case_sensitive);
     
     if (!local_results.empty()) {
         std::lock_guard<std::mutex> lock(results_mutex);
